@@ -1,9 +1,9 @@
 
 # React native RFID reader 
 
-## for Zebra RFD8500 reader
+## for Zebra RFD8500 and MC3300 readers
 
-React-native module for scanning RFID tags with Zebra RFD8500
+React-native module for scanning RFID tags with Zebra RFD8500 and MC3300
 
 ### Install:
 Install the module
