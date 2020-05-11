@@ -1,11 +1,35 @@
 {
+  "_from": "github:ivaldovinos/react-native-zebra-rfid",
+  "_id": "react-native-zebra-rfid-inovabiz@0.0.1",
+  "_inBundle": false,
+  "_integrity": "",
+  "_location": "/react-native-zebra-rfid-inovabiz",
+  "_phantomChildren": {},
+  "_requested": {
+    "type": "git",
+    "raw": "ivaldovinos/react-native-zebra-rfid",
+    "rawSpec": "ivaldovinos/react-native-zebra-rfid",
+    "saveSpec": "github:ivaldovinos/react-native-zebra-rfid",
+    "fetchSpec": null,
+    "gitCommittish": null
+  },
+  "_requiredBy": [
+    "#USER",
+    "/"
+  ],
+  "_resolved": "github:ivaldovinos/react-native-zebra-rfid#87ca1ff99f90c2a94343f4abee40019ea1b1c202",
+  "_spec": "ivaldovinos/react-native-zebra-rfid",
+  "_where": "/Users/florian/Documents/_git/KnorrBremseRFID",
   "author": {
     "name": "ivaldovinos"
   },
   "bugs": {
     "url": "https://github.com/ivaldovinos/react-native-zebra-rfid/issues"
   },
+  "bundleDependencies": false,
   "dependencies": {},
+  "deprecated": false,
+  "description": "React native zebra RIFD for Android",
   "devDependencies": {
     "eslint": "^5.7.0",
     "eslint-config-standard": "^12.0.0",
@@ -14,7 +38,6 @@
     "eslint-plugin-promise": "^4.0.1",
     "eslint-plugin-standard": "^4.0.0"
   },
-  "description": "React native zebra RIFD for Android",
   "directories": {},
   "homepage": "https://github.com/ivaldovinos/react-native-zebra-rfid#readme",
   "keywords": [
@@ -36,7 +59,6 @@
   ],
   "name": "react-native-zebra-rfid-inovabiz",
   "optionalDependencies": {},
-  "readme": "ERROR: No README data found!",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/ivaldovinos/react-native-zebra-rfid.git"
