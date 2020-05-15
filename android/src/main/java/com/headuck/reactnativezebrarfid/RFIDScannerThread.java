@@ -1,4 +1,4 @@
-package com.ivaldovinos.reactnativezebrarfid;
+package com.headuck.reactnativezebrarfid;
 
 import android.content.Context;
 import android.util.Log;
@@ -16,6 +16,10 @@ import com.facebook.react.bridge.WritableMap;
 
 public abstract class RFIDScannerThread extends Thread implements RfidEventsListener {
 
+    private final static String READ = "read";
+    private final static String WRITE = "write";
+    private final static String LOCK = "lock";
+
     private ReactApplicationContext context;
 
     private Readers readers = null;
@@ -23,7 +27,10 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
     private ReaderDevice rfidReaderDevice = null;
     boolean tempDisconnected = false;
     private Boolean reading = false;
+    private Boolean writing = false;
     private ReadableMap config = null;
+    private String rfidMode = READ;
+    private Boolean deferTriggerReleased = false;
 
     public RFIDScannerThread(ReactApplicationContext context) {
         this.context = context;
@@ -269,6 +276,11 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         deviceList = null;
     }
 
+    public void setMode(String mode, ReadableMap config) {
+        this.rfidMode = mode;
+        this.config = config;
+    }
+
     public void read(ReadableMap config) {
         if (this.reading) {
             Log.e("RFID", "already reading");
@@ -299,17 +311,243 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
     }
 
 
-    public void cancel() {
+    // configuration
+    private void setAntennaPower(int power) {
         String err = null;
         if (this.rfidReaderDevice != null) {
+            if (!rfidReaderDevice.getRFIDReader().isConnected()) {
+                err = "read: device not connected";
+            } else {
+                RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
+                try {
+                    // set antenna configurations
+                    Antennas.AntennaRfConfig config = rfidReader.Config.Antennas.getAntennaRfConfig(1);
+                    config.setTransmitPowerIndex(power);
+                    config.setrfModeTableIndex(0);
+                    config.setTari(0);
+                    rfidReader.Config.Antennas.setAntennaRfConfig(1, config);
+                } catch (InvalidUsageException e) {
+                    err = "read: invalid usage error on scanner read: " + e.getMessage();
+                } catch (OperationFailureException ex) {
+                    err = "read: error setting up scanner read: " + ex.getResults().toString();
+                }
+            }
+        } else {
+            err = "read: device not initialised";
+        }
+        if (err != null) {
+            Log.e("RFID", err);
+        }
+    }
+
+    private void setSingulation(SESSION session, INVENTORY_STATE state) {
+        String err = null;
+        if (this.rfidReaderDevice != null) {
+            if (!rfidReaderDevice.getRFIDReader().isConnected()) {
+                err = "read: device not connected";
+            } else {
+                RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
+                try {
+                    // Set the singulation control
+                    Antennas.SingulationControl s1_singulationControl = rfidReader.Config.Antennas.getSingulationControl(1);
+                    s1_singulationControl.setSession(session);
+                    s1_singulationControl.Action.setInventoryState(state);
+                    s1_singulationControl.Action.setSLFlag(SL_FLAG.SL_ALL);
+                    rfidReader.Config.Antennas.setSingulationControl(1, s1_singulationControl);
+                } catch (InvalidUsageException e) {
+                    err = "read: invalid usage error on scanner read: " + e.getMessage();
+                } catch (OperationFailureException ex) {
+                    err = "read: error setting up scanner read: " + ex.getResults().toString();
+                }
+            }
+        } else {
+            err = "read: device not initialised";
+        }
+        if (err != null) {
+            Log.e("RFID", err);
+        }
+    }
+
+    private void setDPO(boolean bEnable) {
+        String err = null;
+        if (this.rfidReaderDevice != null) {
+            if (!rfidReaderDevice.getRFIDReader().isConnected()) {
+                err = "read: device not connected";
+            } else {
+                RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
+                try {
+                    rfidReader.Config.setDPOState(bEnable ? DYNAMIC_POWER_OPTIMIZATION.ENABLE : DYNAMIC_POWER_OPTIMIZATION.DISABLE);
+                } catch (InvalidUsageException e) {
+                    err = "read: invalid usage error on scanner read: " + e.getMessage();
+                } catch (OperationFailureException ex) {
+                    err = "read: error setting up scanner read: " + ex.getResults().toString();
+                }
+            }
+        } else {
+            err = "read: device not initialised";
+        }
+        if (err != null) {
+            Log.e("RFID", err);
+        }
+    }
+
+    private void setAccessOperationConfiguration() {
+        String err = null;
+        if (this.rfidReaderDevice != null) {
+            if (!rfidReaderDevice.getRFIDReader().isConnected()) {
+                err = "read: device not connected";
+            } else {
+                RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
+                try {
+                    // set required power and profile
+                    setAntennaPower(240);
+                    // in case of RFD8500 disable DPO
+                    if (rfidReader.getHostName().contains("RFD8500")) {
+                        setDPO(false);
+                    }
+                    // set access operation time out value to 1 second, so reader will tries for a second
+                    // to perform operation before timing out
+                    rfidReader.Config.setAccessOperationWaitTimeout(1000);
+                } catch (InvalidUsageException e) {
+                    err = "read: invalid usage error on scanner read: " + e.getMessage();
+                } catch (OperationFailureException ex) {
+                    err = "read: error setting up scanner read: " + ex.getResults().toString();
+                }
+            }
+        } else {
+            err = "read: device not initialised";
+        }
+        if (err != null) {
+            Log.e("RFID", err);
+        }
+    }
+
+    //
+    // method to write data
+    //
+    private void writeTag(String sourceEPC, String Password, MEMORY_BANK memory_bank, String targetData, int offset) {
+        String err = null;
+        if (this.rfidReaderDevice != null) {
+            if (!rfidReaderDevice.getRFIDReader().isConnected()) {
+                err = "read: device not connected";
+            } else {
+                RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
+                try {
+                    writing = true;
+                    WritableMap startEvent = Arguments.createMap();
+                    startEvent.putString("RFIDStatusEvent", "writeStart");
+                    this.dispatchEvent("RFIDStatusEvent", startEvent);
+                    TagData tagData = null;
+                    String tagId = sourceEPC;
+                    TagAccess tagAccess = new TagAccess();
+                    TagAccess.WriteAccessParams writeAccessParams = tagAccess.new WriteAccessParams();
+                    String writeData = targetData; //write data in string
+                    writeAccessParams.setAccessPassword(Long.parseLong(Password,16));
+                    writeAccessParams.setMemoryBank(memory_bank);
+                    writeAccessParams.setOffset(offset); // start writing from word offset 0
+                    writeAccessParams.setWriteData(writeData);
+                    // set retries in case of partial write happens
+                    writeAccessParams.setWriteRetries(3);
+                    // data length in words
+                    writeAccessParams.setWriteDataLength(writeData.length() / 4);
+                    // 5th parameter bPrefilter flag is true which means API will apply pre filter internally
+                    // 6th parameter should be true in case of changing EPC ID it self i.e. source and target both is EPC
+                    boolean useTIDfilter = memory_bank == MEMORY_BANK.MEMORY_BANK_EPC;
+                    rfidReader.Actions.TagAccess.writeWait(tagId, writeAccessParams, null, tagData, true, useTIDfilter);
+                } catch (InvalidUsageException e) {
+                    err = "read: invalid usage error on scanner read: " + e.getMessage();
+                } catch (OperationFailureException ex) {
+                    err = "read: error setting up scanner read: " + ex.getResults().toString();
+                }
+                writing = false;
+                WritableMap stopEvent = Arguments.createMap();
+                stopEvent.putString("RFIDStatusEvent", "writeStop");
+                this.dispatchEvent("RFIDStatusEvent", stopEvent);
+
+                WritableMap errEvent = Arguments.createMap();
+                errEvent.putString("RFIDStatusEvent", err);
+                this.dispatchEvent("RFIDStatusEvent", errEvent);
+                // if (deferTriggerReleased) {
+                //     deferTriggerReleased = false;
+                //     this.dispatchEvent("RFIDStatusEvent", Arguments.createMap());
+                // }
+            }
+        } else {
+            err = "read: device not initialised";
+        }
+        if (err != null) {
+            Log.e("RFID", err);
+        }
+    }
+
+
+    public void write(ReadableMap config) {
+        // one time setup to suite the access operation, if reader is already in that state it can be avoided
+        setAccessOperationConfiguration();
+        // all are hex strings
+        // String EPC = "3005FB63AC1F3681EC880468";
+        // String data = "437573746F6D204461746120696E2055736572206D656D6F72792062616E6B0D";
+        String password = "0";//"5A454252";
+        // perform write
+        MEMORY_BANK user = MEMORY_BANK.MEMORY_BANK_USER;
+        MEMORY_BANK epc = MEMORY_BANK.MEMORY_BANK_EPC;
+
+        writeTag(config.getString("epc"), password, epc, config.getString("data"), 0);
+    }
+
+
+    // public void write (String epc, String data) {
+    //     if (this.writing) {
+    //         Log.e("RFID", "already writing");
+    //         return;
+    //     }
+    //     String err = null;
+    //     if (this.rfidReaderDevice != null) {
+    //         if (!rfidReaderDevice.getRFIDReader().isConnected()) {
+    //             err = "read: device not connected";
+    //         } else {
+    //             RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
+    //             try {
+    //                 // one time setup to suite the access operation, if reader is already in that state it can be avoided
+    //                 setAccessOperationConfiguration();
+    //                 // all are hex strings
+    //                 writing = true;
+    //                 String password = "0";
+    //                 // perform write
+    //                 writeTag(epc, password, MEMORY_BANK.MEMORY_BANK_USER, data, 0);
+    //             } catch (InvalidUsageException e) {
+    //                 err = "read: invalid usage error on scanner read: " + e.getMessage();
+    //             } catch (OperationFailureException ex) {
+    //                 err = "read: error setting up scanner read: " + ex.getResults().toString();
+    //             }
+    //         }
+    //     } else {
+    //         err = "read: device not initialised";
+    //     }
+    //     if (err != null) {
+    //         Log.e("RFID", err);
+    //     }
+    // }
+
+
+    public void cancel() {
+        String err = null;
+        if (rfidReaderDevice != null) {
             if (!rfidReaderDevice.getRFIDReader().isConnected()) {
                 err = "cancel: device not connected";
             } else {
                 if (reading) {
                     RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
                     try {
-                        // Stop inventory
-                        rfidReader.Actions.Inventory.stop();
+                        switch (rfidMode) {
+                            case READ:
+                                // Stop inventory
+                                rfidReader.Actions.Inventory.stop();
+                                break;
+                            case WRITE:
+                                // Will stop by itself
+                                break;
+                        }
                     } catch (InvalidUsageException e) {
                         err = "cancel: invalid usage error on scanner read: " + e.getMessage();
                     } catch (OperationFailureException ex) {
@@ -327,7 +565,7 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
     }
 
     public void reconnect() {
-        if (this.rfidReaderDevice != null) {
+        if (rfidReaderDevice != null) {
             if (tempDisconnected) {
                 RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
                 if (!rfidReader.isConnected()) {
@@ -357,6 +595,136 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             }
         } else {
             Log.i("RFID", "reconnect: device is null");
+        }
+    }
+
+    public void settingAntennas(int powerLevel) {
+        String err = null;
+        try {
+            if (this.rfidReaderDevice != null) {
+                Antennas.AntennaRfConfig antennaRfConfig = this.rfidReaderDevice.getRFIDReader().Config.Antennas.getAntennaRfConfig(1);
+                Log.i("RFID","ori config: " +antennaRfConfig);
+                if(powerLevel != antennaRfConfig.getTransmitPowerIndex()) {
+                    antennaRfConfig.setrfModeTableIndex(4);
+                    antennaRfConfig.setTari(0);
+                    antennaRfConfig.setTransmitPowerIndex(powerLevel);
+                    this.rfidReaderDevice.getRFIDReader().Config.Antennas.setAntennaRfConfig(1, antennaRfConfig);
+                    this.rfidReaderDevice.getRFIDReader().Config.saveConfig();
+                }
+                WritableMap event = Arguments.createMap();
+                event.putString("SettingEvent", "Setting Antennas Completed");
+                Log.i("RFID","" + event);
+                this.dispatchEvent("SettingEvent", event);
+                Log.i("RFID", "Setting antennas completed");
+            }
+        } catch (InvalidUsageException e) {
+            err = "Setting Invalid error " + e.getMessage();
+        } catch (OperationFailureException e) {
+            err = "Setting Operation error " + e.getMessage();
+        }
+        if (err != null) {
+            Log.e("RFID", err);
+            WritableMap event = Arguments.createMap();
+            event.putString("SettingEvent", "Setting Antennas Failed");
+            this.dispatchEvent("SettingEvent", event);
+        }
+    }
+    public void gettingAntennas() {
+        Log.i("TEST123", "WTFFFF");
+        String err = null;
+        try {
+            if (this.rfidReaderDevice != null) {
+                RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
+
+                Antennas.AntennaRfConfig antennaRfConfig = rfidReader.Config.Antennas.getAntennaRfConfig(1);
+
+
+                WritableMap data = Arguments.createMap();
+                data.putString("ModeTableIndex", "" + antennaRfConfig.getrfModeTableIndex());
+                data.putString("Tari", "" + antennaRfConfig.getTari());
+                data.putString("PowerIndex", "" + antennaRfConfig.getTransmitPowerIndex());
+
+                WritableMap event = Arguments.createMap();
+                event.putMap("SettingEvent", data);
+                Log.i("RFID", "successful");
+                this.dispatchEvent("SettingEvent", event);
+            }
+            Log.i("RFID", "successful22");
+        } catch (InvalidUsageException e) {
+            err = "Setting Invalid error " + e.getMessage();
+        } catch (OperationFailureException e) {
+            err = "Setting Operation error " + e.getMessage();
+        }
+        if (err != null) {
+            Log.e("RFID", err);
+            WritableMap event = Arguments.createMap();
+            event.putString("SettingEvent", "Getting Beeper Volume Failed");
+            this.dispatchEvent("SettingEvent", event);
+        }
+    }
+    public void gettingBeeper() {
+        String err = null;
+        try {
+            if (this.rfidReaderDevice != null) {
+                BEEPER_VOLUME oribeeperVolume = this.rfidReaderDevice.getRFIDReader().Config.getBeeperVolume();
+                WritableMap event = Arguments.createMap();
+                event.putString("SettingEvent", oribeeperVolume.toString());
+                Log.i("RFID", "successful");
+                Log.i("RFID","ORIG Volume " + oribeeperVolume.toString());
+                this.dispatchEvent("SettingEvent", event);
+            }
+            Log.i("RFID", "successful22");
+        } catch (InvalidUsageException e) {
+            err = "Setting Invalid error " + e.getMessage();
+        } catch (OperationFailureException e) {
+            err = "Setting Operation error " + e.getMessage();
+        }
+        if (err != null) {
+            Log.e("RFID", err);
+            WritableMap event = Arguments.createMap();
+            event.putString("SettingEvent", "Getting Beeper Volume Failed");
+            this.dispatchEvent("SettingEvent", event);
+        }
+    }
+    public void settingBeeper(String beeperVolume) {
+        String err = null;
+        try {
+            if (rfidReaderDevice != null && beeperVolume != null) {
+                RFIDReader rfidReader = rfidReaderDevice.getRFIDReader();
+                BEEPER_VOLUME oribeeperVolume = rfidReader.Config.getBeeperVolume();
+                if (beeperVolume != oribeeperVolume.toString()) {
+                    switch (beeperVolume) {
+                        case "HIGH":
+                            this.rfidReaderDevice.getRFIDReader().Config.setBeeperVolume(BEEPER_VOLUME.HIGH_BEEP);
+                            break;
+                        case "MEDIUM":
+                            this.rfidReaderDevice.getRFIDReader().Config.setBeeperVolume(BEEPER_VOLUME.MEDIUM_BEEP);
+                            break;
+                        case "LOW":
+                            this.rfidReaderDevice.getRFIDReader().Config.setBeeperVolume(BEEPER_VOLUME.LOW_BEEP);
+                            break;
+                        case "QUIET":
+                            this.rfidReaderDevice.getRFIDReader().Config.setBeeperVolume(BEEPER_VOLUME.QUIET_BEEP);
+                            break;
+                    }
+                    this.rfidReaderDevice.getRFIDReader().Config.saveConfig();
+                }
+                WritableMap event = Arguments.createMap();
+                event.putString("SettingEvent", "Setting Bepper Completed");
+                Log.i("RFID","" + event);
+                this.dispatchEvent("SettingEvent", event);
+                Log.i("RFID", "Setting bepper completed");
+            }
+        } catch (InvalidUsageException e) {
+            err = "Setting Invalid error " + e.getMessage();
+        } catch (OperationFailureException e) {
+            err = "Setting Operation error " + e.getMessage();
+        }
+        if (err != null) {
+            Log.e("RFID", err);
+            WritableMap event = Arguments.createMap();
+            event.putString("SettingEvent", "Setting Beeper Failed");
+            this.dispatchEvent("SettingEvent", event);
         }
     }
 
@@ -410,13 +778,26 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         } else if (statusEventType == STATUS_EVENT_TYPE.HANDHELD_TRIGGER_EVENT) {
             HANDHELD_TRIGGER_EVENT_TYPE eventData = rfidStatusEvents.StatusEventData.HandheldTriggerEventData.getHandheldEvent();
             if (eventData == HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_PRESSED) {
-                this.read(this.config);
+                switch (rfidMode) {
+                    case READ:
+                        this.read(this.config);
+                        break;
+                    case WRITE:
+                        if (!writing) {
+                            this.write(this.config);
+                        }
+                        break;
+                }
             } else if (eventData == HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_RELEASED) {
                 this.cancel();
             }
         }
         if (event.hasKey("RFIDStatusEvent")) {
-            this.dispatchEvent("RFIDStatusEvent", event);
+            if (!writing) {
+                this.dispatchEvent("RFIDStatusEvent", event);
+            } else if (rfidStatusEvents.StatusEventData.HandheldTriggerEventData.getHandheldEvent() == HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_RELEASED) {
+                deferTriggerReleased = true;
+            }
         }
     }
 }

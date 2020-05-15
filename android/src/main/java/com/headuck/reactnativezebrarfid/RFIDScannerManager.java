@@ -1,4 +1,4 @@
-package com.ivaldovinos.reactnativezebrarfid;
+package com.headuck.reactnativezebrarfid;
 
 import android.util.Log;
 
@@ -96,10 +96,25 @@ public class RFIDScannerManager extends ReactContextBaseJavaModule implements Li
         }
     }
 
+
+    @ReactMethod
+    public void setMode(String mode, ReadableMap config) {
+        if (this.scannerthread != null) {
+            this.scannerthread.setMode(mode, config);
+        }
+    }
+    
     @ReactMethod
     public void read(ReadableMap config) {
         if (this.scannerthread != null) {
             this.scannerthread.read(config);
+        }
+    }
+
+    @ReactMethod
+    public void write(ReadableMap config) {
+        if (this.scannerthread != null) {
+            this.scannerthread.write(config);
         }
     }
 
@@ -117,4 +132,31 @@ public class RFIDScannerManager extends ReactContextBaseJavaModule implements Li
         }
     }
 
+    @ReactMethod
+    public void settingAntennas(int powerLevel) {
+        if (this.scannerthread != null) {
+            this.scannerthread.settingAntennas(powerLevel);
+        }
+    }
+
+    @ReactMethod
+    public void gettingAntennas() {
+        if (this.scannerthread != null) {
+            this.scannerthread.gettingAntennas();
+        }
+    }
+
+    @ReactMethod
+    public void settingBeeper(String beeperVolume) {
+        if (this.scannerthread != null) {
+            this.scannerthread.settingBeeper(beeperVolume);
+        }
+    }
+
+    @ReactMethod
+    public void gettingBeeper() {
+        if (this.scannerthread != null) {
+            this.scannerthread.gettingBeeper();
+        }
+    }
 }
