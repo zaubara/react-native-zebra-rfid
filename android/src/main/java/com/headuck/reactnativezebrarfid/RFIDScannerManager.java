@@ -104,19 +104,19 @@ public class RFIDScannerManager extends ReactContextBaseJavaModule implements Li
         }
     }
     
-    @ReactMethod
-    public void read(ReadableMap config) {
-        if (this.scannerthread != null) {
-            this.scannerthread.read(config);
-        }
-    }
-
-    @ReactMethod
-    public void write(ReadableMap config) {
-        if (this.scannerthread != null) {
-            this.scannerthread.write(config);
-        }
-    }
+//    @ReactMethod
+//    public void read(ReadableMap config) {
+//        if (this.scannerthread != null) {
+//            this.scannerthread.read(config);
+//        }
+//    }
+//
+//    @ReactMethod
+//    public void write(ReadableMap config) {
+//        if (this.scannerthread != null) {
+//            this.scannerthread.write(config);
+//        }
+//    }
 
     @ReactMethod
     public void cancel() {
@@ -129,34 +129,6 @@ public class RFIDScannerManager extends ReactContextBaseJavaModule implements Li
     public void shutdown() {
         if (this.scannerthread != null) {
             this.scannerthread.shutdown();
-        }
-    }
-
-    @ReactMethod
-    public void settingAntennas(int powerLevel) {
-        if (this.scannerthread != null) {
-            this.scannerthread.settingAntennas(powerLevel);
-        }
-    }
-
-    @ReactMethod
-    public void gettingAntennas() {
-        if (this.scannerthread != null) {
-            this.scannerthread.gettingAntennas();
-        }
-    }
-
-    @ReactMethod
-    public void settingBeeper(String beeperVolume) {
-        if (this.scannerthread != null) {
-            this.scannerthread.settingBeeper(beeperVolume);
-        }
-    }
-
-    @ReactMethod
-    public void gettingBeeper() {
-        if (this.scannerthread != null) {
-            this.scannerthread.gettingBeeper();
         }
     }
 }
