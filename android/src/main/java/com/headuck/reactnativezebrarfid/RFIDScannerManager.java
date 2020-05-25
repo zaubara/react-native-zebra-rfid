@@ -98,9 +98,9 @@ public class RFIDScannerManager extends ReactContextBaseJavaModule implements Li
 
 
     @ReactMethod
-    public void setMode(String mode, ReadableMap config) {
+    public void setMode(String mode, String tagId) {
         if (this.scannerthread != null) {
-            this.scannerthread.setMode(mode, config);
+            this.scannerthread.setMode(mode, tagId);
         }
     }
     
@@ -112,9 +112,9 @@ public class RFIDScannerManager extends ReactContextBaseJavaModule implements Li
 //    }
 //
 //    @ReactMethod
-//    public void write(ReadableMap config) {
+//    public void read(String tagId) {
 //        if (this.scannerthread != null) {
-//            this.scannerthread.write(config);
+//            this.scannerthread.read(tagId);
 //        }
 //    }
 

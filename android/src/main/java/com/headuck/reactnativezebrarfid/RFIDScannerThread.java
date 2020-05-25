@@ -17,9 +17,11 @@ import com.facebook.react.bridge.WritableMap;
 public abstract class RFIDScannerThread extends Thread implements RfidEventsListener {
 
     private final static String NONE = "none";
+    private final static String INVENTORY = "inventory";
     private final static String READ = "read";
     private final static String WRITE = "write";
     private final static String LOCK = "lock";
+    private final static String CHECK_USER = "checkUser";
 
     private final static MEMORY_BANK USER = MEMORY_BANK.MEMORY_BANK_USER;
     private final static MEMORY_BANK EPC = MEMORY_BANK.MEMORY_BANK_EPC;
@@ -32,6 +34,8 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
     boolean tempDisconnected = false;
 
     private String rfidMode = NONE;
+    private String tagId = null;
+
     private Boolean active = false;
     private ReadableMap config = null;
     private Boolean deferTriggerReleased = false;
@@ -92,6 +96,7 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         tempDisconnected = false;
         active = false;
         rfidMode = NONE;
+        tagId = null;
         this.connect();
     }
 
@@ -127,6 +132,8 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
                             // Subscribe required status notification
                             rfidReader.Events.setInventoryStartEvent(true);
                             rfidReader.Events.setInventoryStopEvent(true);
+
+                            rfidReader.Events.setAttachTagDataWithReadEvent(false);
                             // enables tag read notification
                             rfidReader.Events.setTagReadEvent(true);
                             rfidReader.Events.setReaderDisconnectEvent(true);
@@ -318,18 +325,38 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         shutdown();
     }
 
-    // ----------
-    // Operations
-    // ----------
-
-    public void setMode(String mode, ReadableMap config) {
+    // ------------------
+    // General Operations
+    // ------------------
+    public void setMode(String mode, String tagId) {
         LogEvent("SET MODE: " + mode);
         if (active) {
             cancel();
         }
-        this.rfidMode = mode;
-        this.config = config;
-        log("MODE: " + mode);
+        String err = null;
+        try {
+            if (mode.equals(CHECK_USER)) {
+                RFIDReader rfidReader = getConnectedRFIDReader();
+                setSingulationForFilter(rfidReader);
+                addfilters(rfidReader, tagId);
+            }
+
+            this.rfidMode = mode;
+    //        this.config = config;
+            this.tagId = tagId;
+            log("MODE: " + mode);
+
+        } catch (InvalidUsageException e) {
+            err = "cancel: invalid usage error on scanner read: " + e.getMessage();
+        } catch (OperationFailureException ex) {
+            err = "cancel: error setting up scanner read: " + ex.getResults().toString();
+        } catch(Exception exc) {
+            err = exc.getMessage();
+        }
+
+        if (err != null) {
+            log("RFID setMode - " + err);
+        }
     }
 
     public void cancel() {
@@ -337,12 +364,20 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         String err = null;
         try {
             switch (rfidMode) {
-                case READ:
+                case INVENTORY:
                     // Stop inventory
                     stopInventory();
                     break;
+                case READ:
+                case CHECK_USER:
+                    log("CANCEL READ");
+                    stopRead();
+                    break;
                 case WRITE:
                     // Will stop by itself
+                    break;
+                case NONE:
+                    // Do nothing
                     break;
             }
         } catch (InvalidUsageException e) {
@@ -359,6 +394,9 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         log("CANCEL 222");
     }
 
+    // ---------
+    // Inventory
+    // ---------
     public void startInventory(ReadableMap config) throws Exception {
         log("startInventory 111: " + !active);
         if (!active) {
@@ -378,7 +416,22 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             log("stopInventory 222");
         }
     }
-
+    // -------
+    // Writing
+    // -------
+    public void tagAccess (String tagId) throws Exception {
+        RFIDReader rfidReader = getConnectedRFIDReader();
+        // Read user memory bank for the given tag ID
+        TagAccess tagAccess = new TagAccess();
+        TagAccess.ReadAccessParams readAccessParams = tagAccess.new ReadAccessParams();
+        TagData readAccessTag;
+        readAccessParams.setAccessPassword(0);
+        readAccessParams.setCount(4); // read 4 words
+        readAccessParams.setMemoryBank(MEMORY_BANK.MEMORY_BANK_USER);
+        readAccessParams.setOffset(0); // start reading from word offset 0
+        readAccessTag = rfidReader.Actions.TagAccess.readWait(tagId, readAccessParams, null);
+        log(readAccessTag.getMemoryBank().toString() + " : " + readAccessTag.getMemoryBankData());
+    }
     private void writeTag(String sourceEPC, String Password, MEMORY_BANK memory_bank, String targetData, int offset) {
         String err = null;
         if (this.rfidReaderDevice != null) {
@@ -433,8 +486,6 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             log("RFID - " + err);
         }
     }
-
-
     public void write(ReadableMap config) throws Exception {
         RFIDReader rfidReader = getConnectedRFIDReader();
         // one time setup to suite the access operation, if reader is already in that state it can be avoided
@@ -445,6 +496,36 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         String password = "0";//"5A454252";
         // perform write
         writeTag(config.getString("user"), password, USER, config.getString("data"), 0);
+    }
+    // -------
+    // Reading
+    // -------
+    public void read () throws Exception {
+        if (!active) {
+            RFIDReader rfidReader = getConnectedRFIDReader();
+
+            TagAccess tagAccess = new TagAccess();
+            TagAccess.ReadAccessParams readAccessParams = tagAccess.new ReadAccessParams();
+
+            readAccessParams.setAccessPassword(0);
+            // read 4 words
+            readAccessParams.setCount(4);
+            // user memory bank
+            readAccessParams.setMemoryBank(MEMORY_BANK.MEMORY_BANK_USER);
+            // start reading from word offset 0
+            readAccessParams.setOffset(0);
+            // read operation
+            rfidReader.Actions.TagAccess.readEvent(readAccessParams, null, null);
+            active = true;
+        }
+
+    }
+    public void stopRead () throws Exception {
+        if (active) {
+            RFIDReader rfidReader = getConnectedRFIDReader();
+            rfidReader.Actions.TagAccess.stopAccess();
+            active = false;
+        }
     }
 
     // -------------
@@ -473,14 +554,6 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         this.dispatchEvent("SettingEvent", event);
     }
 
-    private void setSingulation(RFIDReader reader, SESSION session, INVENTORY_STATE state) throws InvalidUsageException, OperationFailureException {
-        Antennas.SingulationControl s1_singulationControl = reader.Config.Antennas.getSingulationControl(1);
-        s1_singulationControl.setSession(session);
-        s1_singulationControl.Action.setInventoryState(state);
-        s1_singulationControl.Action.setSLFlag(SL_FLAG.SL_ALL);
-        reader.Config.Antennas.setSingulationControl(1, s1_singulationControl);
-    }
-
     private void setDPO(RFIDReader reader, boolean bEnable) throws InvalidUsageException, OperationFailureException {
        reader.Config.setDPOState(bEnable ? DYNAMIC_POWER_OPTIMIZATION.ENABLE : DYNAMIC_POWER_OPTIMIZATION.DISABLE);
     }
@@ -497,35 +570,117 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         reader.Config.setAccessOperationWaitTimeout(1000);
     }
 
+    // Add state aware pre-filter
+    private void addfilters(RFIDReader reader, String tag) {
+        log("SETUP addFilters");
+        // Add state aware pre-filter
+        PreFilters filters = new PreFilters();
+        PreFilters.PreFilter filter = filters.new PreFilter();
+        filter.setAntennaID((short) 1);// Set this filter for Antenna ID 1
+        filter.setTagPattern(tag);// Tags which starts with passed pattern
+        filter.setTagPatternBitCount(tag.length() * 4);
+        filter.setBitOffset(0); // skip PC bits (always it should be in bit length) // 32
+        filter.setMemoryBank(MEMORY_BANK.MEMORY_BANK_USER);
+        filter.setFilterAction(FILTER_ACTION.FILTER_ACTION_STATE_AWARE); // use state aware singulation
+        filter.StateAwareAction.setTarget(TARGET.TARGET_INVENTORIED_STATE_S1); // inventoried flag of session S1 of matching tags to B
+        filter.StateAwareAction.setStateAwareAction(STATE_AWARE_ACTION.STATE_AWARE_ACTION_INV_B);
+        // not to select tags that match the criteria
+        try {
+            reader.Actions.PreFilters.add(filter);
+        } catch (InvalidUsageException e) {
+            e.printStackTrace();
+        } catch (OperationFailureException e) {
+            e.printStackTrace();
+        }
+    }
+
+//    private void setSingulation(RFIDReader reader, SESSION session, INVENTORY_STATE state) throws InvalidUsageException, OperationFailureException {
+//        Antennas.SingulationControl s1_singulationControl = reader.Config.Antennas.getSingulationControl(1);
+//        s1_singulationControl.setSession(session);
+//        s1_singulationControl.Action.setInventoryState(state);
+//        s1_singulationControl.Action.setSLFlag(SL_FLAG.SL_ALL);
+//        reader.Config.Antennas.setSingulationControl(1, s1_singulationControl);
+//    }
+    // Set the singulation control matching with prefilter
+    private void setSingulationForFilter(RFIDReader reader) {
+        log("SETUP setSingulationForFilter");
+        try {
+            Antennas.SingulationControl s1_singulationControl = reader.Config.Antennas.getSingulationControl(1);
+            s1_singulationControl.setSession(SESSION.SESSION_S1);
+            s1_singulationControl.Action.setInventoryState(INVENTORY_STATE.INVENTORY_STATE_B);
+            s1_singulationControl.Action.setPerformStateAwareSingulationAction(true);
+            reader.Config.Antennas.setSingulationControl(1, s1_singulationControl);
+        } catch (InvalidUsageException e) {
+            e.printStackTrace();
+        } catch (OperationFailureException e) {
+            e.printStackTrace();
+        }
+    }
+
     // -------------------
     // RfidEventsListeners
     // -------------------
     @Override
     public void eventReadNotify(RfidReadEvents rfidReadEvents) {
-        log("eventReadNotify 111");
-        String err = null;
-        try {
-            RFIDReader rfidReader = getConnectedRFIDReader();
-            TagDataArray tagArray = rfidReader.Actions.getReadTagsEx(100);
-            if (tagArray != null) {
-                WritableArray rfidTags = Arguments.createArray();
-                for (int i = 0; i < tagArray.getLength(); i++) {
-                    TagData tag = tagArray.getTags()[i];
-                    this.dispatchEvent("TagEvent", tag.getTagID());
-                    rfidTags.pushString(tag.getTagID());
+        if (active) {
+            String err = null;
+            try {
+                RFIDReader rfidReader = getConnectedRFIDReader();
+                TagDataArray tagArray = rfidReader.Actions.getReadTagsEx(100);
+                if (tagArray != null) {
+                    WritableArray rfidTags = Arguments.createArray();
+                    for (int i = 0; i < tagArray.getLength(); i++) {
+                        TagData tag = tagArray.getTags()[i];
+                        String tagData = null;
+                        switch (rfidMode) {
+                            case NONE:
+                                break;
+                            case INVENTORY:
+                                tagData = tag.getTagID();
+                                break;
+                            case READ:
+                            case CHECK_USER:
+                                if (tag != null) {
+                                    ACCESS_OPERATION_CODE readAccessOperation = tag.getOpCode();
+                                    if (readAccessOperation != null) {
+                                        if (tag.getOpStatus() != null && !tag.getOpStatus().equals(ACCESS_OPERATION_STATUS.ACCESS_SUCCESS)) {
+                                            err = tag.getOpStatus().toString().replaceAll("_", " ");
+                                            tagData = err;
+                                        } else {
+                                            if (tag.getOpCode() == ACCESS_OPERATION_CODE.ACCESS_OPERATION_READ) {
+                                                tagData = tag.getMemoryBankData();
+                                            } else {
+                                                err = "READ FAIL";
+                                                tagData = err;
+                                            }
+                                        }
+                                    } else {
+                                        err = "ACCESS READ memoryBankData is null";
+                                        tagData = err;
+                                    }
+                                } else {
+                                    err = "ACCESS OPERATION FAILED";
+                                    tagData = err;
+                                }
+                                break;
+                        }
+                        if (tagData != null) {
+                            this.dispatchEvent("TagEvent", tagData);
+                            rfidTags.pushString(tagData);
+                        }
+                    }
+                    if (rfidTags.size() > 0) {
+                        this.dispatchEvent("TagsEvent", rfidTags);
+                    }
                 }
-                log("eventReadNotify 111-TAGS-111");
-                this.dispatchEvent("TagsEvent", rfidTags);
-                log("eventReadNotify 111-TAGS-222");
+            } catch (Exception e) {
+                err = e.getMessage();
             }
-        } catch (Exception e) {
-            err = e.getMessage();
-        }
 
-        if (err != null) {
-            log("RFID - " + err);
+            if (err != null) {
+                log("RFID - " + err);
+            }
         }
-        log("eventReadNotify 222");
     }
 
     @Override
@@ -549,28 +704,36 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             String err = null;
 
             if (eventData == HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_PRESSED) {
-                switch (rfidMode) {
-                    case READ:
-                        try {
+                try {
+                    switch (rfidMode) {
+                        case INVENTORY:
                             this.startInventory(this.config);
-                        } catch (InvalidUsageException e) {
-                            err = "read: invalid usage error on scanner read: " + e.getMessage();
-                        } catch (OperationFailureException ex) {
-                            err = "read: error setting up scanner read: " + ex.getResults().toString();
-                        } catch (Exception exc) {
-                            err = exc.getMessage();
-                        }
+                            break;
+                        case READ:
+                        case CHECK_USER:
+                            log("TEST");
+                            this.read();
+                            break;
+//                        case WRITE:
+//                            if (!active) {
+//                                // TODO: Richtig Implementieren
+//    //                            this.write(this.config);
+//                            }
+//                            break;
+                        case NONE:
+                            tagId = null;
+                            break;
+                    }
+                } catch (InvalidUsageException e) {
+                    err = "read: invalid usage error on scanner read: " + e.getMessage();
+                } catch (OperationFailureException ex) {
+                    err = "read: error setting up scanner read: " + ex.getResults().toString();
+                } catch (Exception exc) {
+                    err = exc.getMessage();
+                }
 
-                        if (err != null) {
-                            Log.e("RFID", err);
-                        }
-                        break;
-                    case WRITE:
-                        if (!active) {
-                            // TODO: Richtig Implementieren
-//                            this.write(this.config);
-                        }
-                        break;
+                if (err != null) {
+                    Log.e("RFID", err);
                 }
             } else if (eventData == HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_RELEASED) {
                 this.cancel();
