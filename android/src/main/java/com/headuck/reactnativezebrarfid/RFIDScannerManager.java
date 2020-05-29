@@ -98,9 +98,9 @@ public class RFIDScannerManager extends ReactContextBaseJavaModule implements Li
 
 
     @ReactMethod
-    public void setMode(String mode, String tagId) {
+    public void setMode(String mode, ReadableMap config) {
         if (this.scannerthread != null) {
-            this.scannerthread.setMode(mode, tagId);
+            this.scannerthread.setMode(mode, config);
         }
     }
     
