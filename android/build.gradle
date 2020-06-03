@@ -36,6 +36,9 @@ dependencies {
     implementation "com.android.support:appcompat-v7:28.0.0"
     implementation "com.facebook.react:react-native:+"
     implementation (name: 'API3_LIB-release-2.0.1.27', ext: 'aar')
+    implementation "org.apache.commons:commons-lang3:3.0"
+
+
 }
 
 repositories {
