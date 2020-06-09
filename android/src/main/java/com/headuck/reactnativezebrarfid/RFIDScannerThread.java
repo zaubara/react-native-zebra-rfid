@@ -23,7 +23,7 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
     private final static String INVENTORY = "inventory";
     private final static String READ = "read";
     private final static String WRITE = "write";
-    private final static String LOCK = "lock";
+    private final static String PERMA_LOCK = "perma_lock";
 
     // Config keys
     private final static String MEMORY = "memory_bank";
@@ -103,7 +103,6 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         readLength = 0;
         readLengthOffset = 0;
         writeDataOffset = 0;
-//        filterDataOffset = 0;
         antennaPower = ANTENNA_POWER_DEFAULT;
     }
     private void LogEvent(String message) {
@@ -112,13 +111,12 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         this.dispatchEvent("RFIDStatusEvent", event);
     }
     private void log(String message) {
-        Log.i("TEST123", message);
+        Log.i("LOG_ZEBRA_RFID", message);
     }
 
     // ----------
     // Life Cycle
     // ----------
-
     public void init(Context context) {
         // Register receiver
         readers = new Readers(context, ENUM_TRANSPORT.BLUETOOTH);
@@ -166,11 +164,6 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
                     while (true) {
                         try {
                             rfidReader.connect();
-
-//                            rfidReader.Actions.reset();
-//                            RegulatoryConfig regulatoryConfig = rfidReader.Config.getRegulatoryConfig();
-//                            rfidReader.Config.resetFactoryDefaults();
-//                            rfidReader.Config.setRegulatoryConfig(regulatoryConfig);
 
                             rfidReader.Config.getDeviceStatus(true, false, false);
                             rfidReader.Events.addEventsListener(this);
@@ -374,11 +367,9 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
     // General Operations
     // ------------------
     public void setMode(String mode, ReadableMap config) {
-        log("SET MODE: " + mode);
         if (active) {
             cancel();
         }
-        String err = null;
         resetModeData();
 
         String memory_bank_string;
@@ -396,13 +387,13 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
 
         try {
             memory_bank = MEMORY_BANK.GetMemoryBankValue(memory_bank_string);
-        } catch(Exception e) {
-            log("ERROR1" + e.getMessage());
+        } catch (Exception e) {
+            memory_bank = MEMORY_BANK.MEMORY_BANK_USER;
         }
         try {
             filter_memory_bank = MEMORY_BANK.GetMemoryBankValue(filter_memory_bank_string);
-        } catch(Exception e) {
-            log("ERROR2" + e.getMessage());
+        } catch (Exception e) {
+            filter_memory_bank = MEMORY_BANK.MEMORY_BANK_EPC;
         }
 
         if (config.hasKey(FILTER_TAG_ID)) {
@@ -412,22 +403,19 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             }
             int filterLengthRest = filterTagId.length() % 4;
             if (filterLengthRest > 0) {
-//                this.filterDataOffset = 4 - filterLengthRest;
-                log("FILTER LENGTH BEFORE" + " - " + filterTagId.length());
                 this.filterTagId = filterTagId.substring(0, filterTagId.length() - filterLengthRest);
-//              StringUtils.repeat("0",filterDataOffset);
-                log("FILTER LENGTH AFTER" + " - " + filterTagId.length());
             }
         }
+
         if (config.hasKey(TAG_DATA)) {
             this.tagData = config.getString(TAG_DATA);
             int writeLengthRest = tagData.length() % 4;
             if (writeLengthRest > 0) {
                 this.writeDataOffset = 4 - writeLengthRest;
                 this.tagData += StringUtils.repeat("0",writeDataOffset);
-                log("WRITE LENGTH" + " - " + tagData.length());
             }
         }
+
         if (config.hasKey(READ_LENGTH)) {
             this.readLength = config.getInt(READ_LENGTH) / 4;
             int readLengthRest = config.getInt(READ_LENGTH) % 4;
@@ -444,6 +432,7 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
                     lock_memory = LOCK_DATA_FIELD.LOCK_ACCESS_PASSWORD;
                     break;
                 case LOCK_USER_MEMORY:
+                default:
                     lock_memory = LOCK_DATA_FIELD.LOCK_USER_MEMORY;
                     break;
             }
@@ -464,11 +453,7 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         }
 
         this.rfidMode = mode;
-        log("MODE: " + mode + " TAGDATA: " + this.tagData + " TAGID: " + this.filterTagId + " POWER: " + this.antennaPower);
-
-        if (err != null) {
-            log("RFID setMode - " + err);
-        }
+        log("MODE: " + mode + " POWER: " + this.antennaPower);
     }
 
     public void cancel() {
@@ -476,19 +461,12 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         try {
             switch (rfidMode) {
                 case INVENTORY:
-                    // Stop inventory
                     stopInventory();
                     break;
                 case READ:
-                    log("CANCEL READ");
-                    stopRead();
-                    break;
                 case WRITE:
-                    log("CANCEL WRITE");
-                    stopWrite();
-                    break;
-                case LOCK:
-                    stopLock();
+                case PERMA_LOCK:
+                    stopTagAccess();
                     break;
                 case NONE:
                     // Do nothing
@@ -503,18 +481,7 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         }
 
         if (err != null) {
-            log("RFID - " + err);
-        }
-    }
-
-    // ---------
-    // Inventory
-    // ---------
-    public void startInventory(ReadableMap config) throws Exception {
-        if (!active) {
-            RFIDReader rfidReader = getConnectedRFIDReader();
-            rfidReader.Actions.Inventory.perform(null, null, null);
-            active = true;
+            log("ERROR: " + err);
         }
     }
 
@@ -525,11 +492,28 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             active = false;
         }
     }
+    public void stopTagAccess () throws Exception {
+        if (active) {
+            RFIDReader rfidReader = getConnectedRFIDReader();
+            rfidReader.Actions.TagAccess.stopAccess();
+            active = false;
+        }
+    }
+    // ---------
+    // Inventory
+    // ---------
+    public void startInventory(ReadableMap config) throws Exception {
+        if (!active) {
+            RFIDReader rfidReader = getConnectedRFIDReader();
+
+            active = true;
+            rfidReader.Actions.Inventory.perform(null, null, null);
+        }
+    }
     // -------
     // Writing
     // -------
     public void write() throws Exception {
-        log("WRITE");
         if (!active) {
             RFIDReader rfidReader = getConnectedRFIDReader();
 
@@ -539,31 +523,25 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             TagAccess tagAccess = new TagAccess();
             TagAccess.WriteAccessParams writeAccessParams = tagAccess.new WriteAccessParams();
 
-            writeAccessParams.setAccessPassword(Long.parseLong("0",16));
             if (memory_bank != null) {
                 writeAccessParams.setMemoryBank(memory_bank);
             } else {
                 writeAccessParams.setMemoryBank(MEMORY_BANK.MEMORY_BANK_USER);
             }
-            writeAccessParams.setOffset(0); // start writing from word offset 0
-            writeAccessParams.setWriteData(tagData);
-            // set retries in case of partial write happens
-            writeAccessParams.setWriteRetries(3);
-            // data length in words
-            writeAccessParams.setWriteDataLength(tagData.length() / 4);
-            // 5th parameter bPrefilter flag is true which means API will apply pre filter internally
-            // 6th parameter should be true in case of changing EPC ID it self i.e. source and target both is EPC
-//            boolean useTIDfilter = memory_bank == MEMORY_BANK.MEMORY_BANK_EPC;
 
-            AccessFilter accessFilter = null;
-            // Tag Pattern A
-            accessFilter = new AccessFilter();
+            writeAccessParams.setAccessPassword(0);
+            writeAccessParams.setOffset(0);
+            writeAccessParams.setWriteData(tagData);
+            writeAccessParams.setWriteRetries(3);
+            writeAccessParams.setWriteDataLength(tagData.length() / 4);
+
+            AccessFilter accessFilter = new AccessFilter();
+
             if (filter_memory_bank != null) {
                 accessFilter.TagPatternA.setMemoryBank(filter_memory_bank);
             } else {
                 accessFilter.TagPatternA.setMemoryBank(MEMORY_BANK.MEMORY_BANK_EPC);
             }
-
             accessFilter.TagPatternA.setTagPattern(filterTagId);
             accessFilter.TagPatternA.setTagPatternBitCount(filterTagId.length() * 4);
             accessFilter.TagPatternA.setBitOffset(0);
@@ -571,17 +549,8 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             accessFilter.TagPatternA.setTagMaskBitCount(filterTagId.length() * 4);
             accessFilter.setAccessFilterMatchPattern(FILTER_MATCH_PATTERN.A);
 
-            // perform write
             active = true;
             rfidReader.Actions.TagAccess.writeEvent(writeAccessParams, accessFilter, null);
-        }
-    }
-
-    public void stopWrite () throws Exception {
-        if (active) {
-            RFIDReader rfidReader = getConnectedRFIDReader();
-            rfidReader.Actions.TagAccess.stopAccess();
-            active = false;
         }
     }
     // -------
@@ -596,92 +565,66 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             TagAccess tagAccess = new TagAccess();
             TagAccess.ReadAccessParams readAccessParams = tagAccess.new ReadAccessParams();
 
-            readAccessParams.setAccessPassword(0);
-            // read n words
-            readAccessParams.setCount(readLength);
-            // user memory bank
             if (memory_bank != null) {
                 readAccessParams.setMemoryBank(memory_bank);
             } else {
                 readAccessParams.setMemoryBank(MEMORY_BANK.MEMORY_BANK_USER);
             }
-            // start reading from word offset 0
+
             readAccessParams.setOffset(0);
+            readAccessParams.setAccessPassword(0);
+            readAccessParams.setCount(readLength);
 
             AccessFilter accessFilter = null;
             if (filterTagId != null && filter_memory_bank != null) {
-                log("ACCESS FILTER " + filterTagId + " " + filterTagId.length());
-                // Tag Pattern A
                 accessFilter = new AccessFilter();
                 accessFilter.TagPatternA.setMemoryBank(filter_memory_bank);
                 accessFilter.TagPatternA.setTagPattern(filterTagId);
                 accessFilter.TagPatternA.setTagPatternBitCount(filterTagId.length() * 4);
                 accessFilter.TagPatternA.setBitOffset(0);
                 accessFilter.TagPatternA.setTagMask(filterTagId);
-//                accessFilter.TagPatternA.setTagMask(StringUtils.repeat("F",filterTagId.length()));
                 accessFilter.TagPatternA.setTagMaskBitCount(filterTagId.length() * 4);
                 accessFilter.setAccessFilterMatchPattern(FILTER_MATCH_PATTERN.A);
-                log("ACCESS FILTER END");
             }
 
-            // read operation
-            log("OPERATION 1");
-            try {
-                rfidReader.Actions.TagAccess.readEvent(readAccessParams, accessFilter, null);
-            } catch(Exception e) {
-                Log.i("TEST123", e.getMessage(), e.fillInStackTrace());
-            }
-            log("OPERATION 2");
             active = true;
+            rfidReader.Actions.TagAccess.readEvent(readAccessParams, accessFilter, null);
         }
 
     }
-    public void stopRead () throws Exception {
-        if (active) {
-            RFIDReader rfidReader = getConnectedRFIDReader();
-            rfidReader.Actions.TagAccess.stopAccess();
-            active = false;
-        }
-    }
-    // ----
-    // LOCK
-    // ----
-    public void lock () throws Exception {
+    // ---------
+    // PermaLock
+    // ---------
+    public void permaLock() throws Exception {
         if (!active) {
             RFIDReader rfidReader = getConnectedRFIDReader();
 
             setAntennaPower(rfidReader, antennaPower);
-            // Lock the tag
+
             TagAccess tagAccess = new TagAccess();
             TagAccess.LockAccessParams lockAccessParams = tagAccess.new LockAccessParams();
-            /* lock now */
-            lockAccessParams.setLockPrivilege(lock_memory, LOCK_PRIVILEGE.LOCK_PRIVILEGE_READ_WRITE);
-            lockAccessParams.setAccessPassword(lock_password);
 
-            AccessFilter accessFilter = null;
-            if (filterTagId != null && filter_memory_bank != null) {
-                log("ACCESS FILTER " + filterTagId + " " + filterTagId.length());
-                // Tag Pattern A
-                accessFilter = new AccessFilter();
+            lockAccessParams.setLockPrivilege(lock_memory, LOCK_PRIVILEGE.LOCK_PRIVILEGE_PERMA_LOCK);
+            lockAccessParams.setAccessPassword(0);
+
+            AccessFilter accessFilter = new AccessFilter();
+
+            if (filter_memory_bank != null) {
                 accessFilter.TagPatternA.setMemoryBank(filter_memory_bank);
-                accessFilter.TagPatternA.setTagPattern(filterTagId);
-                accessFilter.TagPatternA.setTagPatternBitCount(filterTagId.length() * 4);
-                accessFilter.TagPatternA.setBitOffset(0);
-                accessFilter.TagPatternA.setTagMask(filterTagId);
-                accessFilter.TagPatternA.setTagMaskBitCount(filterTagId.length() * 4);
-                accessFilter.setAccessFilterMatchPattern(FILTER_MATCH_PATTERN.A);
+            } else {
+                accessFilter.TagPatternA.setMemoryBank(MEMORY_BANK.MEMORY_BANK_EPC);
             }
 
+            accessFilter.TagPatternA.setMemoryBank(filter_memory_bank);
+            accessFilter.TagPatternA.setTagPattern(filterTagId);
+            accessFilter.TagPatternA.setTagPatternBitCount(filterTagId.length() * 4);
+            accessFilter.TagPatternA.setBitOffset(0);
+            accessFilter.TagPatternA.setTagMask(filterTagId);
+            accessFilter.TagPatternA.setTagMaskBitCount(filterTagId.length() * 4);
+            accessFilter.setAccessFilterMatchPattern(FILTER_MATCH_PATTERN.A);
+            
             active = true;
             rfidReader.Actions.TagAccess.lockEvent(lockAccessParams, accessFilter, null);
-        }
-    }
-
-    public void stopLock () throws Exception {
-        if (active) {
-            RFIDReader rfidReader = getConnectedRFIDReader();
-            rfidReader.Actions.TagAccess.stopAccess();
-            active = false;
         }
     }
     // -------------
@@ -689,29 +632,23 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
     // -------------
     private void setTriggerMode(RFIDReader reader) throws Exception {
         TriggerInfo triggerInfo = new TriggerInfo();
-        // Start trigger: set to immediate mode
         triggerInfo.StartTrigger.setTriggerType(START_TRIGGER_TYPE.START_TRIGGER_TYPE_IMMEDIATE);
-        // Stop trigger: set to immediate mode
         triggerInfo.StopTrigger.setTriggerType(STOP_TRIGGER_TYPE.STOP_TRIGGER_TYPE_IMMEDIATE);
         reader.Config.setStartTrigger(triggerInfo.StartTrigger);
         reader.Config.setStopTrigger(triggerInfo.StopTrigger);
     }
 
     private void setAntennaPower(RFIDReader reader, int power) throws InvalidUsageException, OperationFailureException {
-        log("POWER: " + power);
         Antennas.AntennaRfConfig config = reader.Config.Antennas.getAntennaRfConfig(1);
         config.setTransmitPowerIndex(power);
-        config.setrfModeTableIndex(0); // antennaRfConfig.setrfModeTableIndex(4);
+        config.setrfModeTableIndex(0);
         config.setTari(0);
         reader.Config.Antennas.setAntennaRfConfig(1, config);
-//        reader.Config.saveConfig();
 
         WritableMap event = Arguments.createMap();
         event.putString("SettingsEvent", "Setting Antennas to " + power + " completed");
         this.dispatchEvent("SettingEvent", event);
     }
-
-
 
     private void setDPO(RFIDReader reader, boolean bEnable) throws InvalidUsageException, OperationFailureException {
        reader.Config.setDPOState(bEnable ? DYNAMIC_POWER_OPTIMIZATION.ENABLE : DYNAMIC_POWER_OPTIMIZATION.DISABLE);
@@ -722,8 +659,7 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         if (reader.getHostName().contains("RFD8500")) {
             setDPO(reader,false);
         }
-        // set access operation time out value to 1 second, so reader will tries for a second
-        // to perform operation before timing out
+
         reader.Config.setAccessOperationWaitTimeout(1000);
     }
 
@@ -732,7 +668,6 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
     // -------------------
     @Override
     public void eventReadNotify(RfidReadEvents rfidReadEvents) {
-        log("ACTIVE: " + active);
         if (active) {
             String err = null;
             try {
@@ -755,22 +690,21 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
                                     if (readAccessOperation != null) {
                                         if (tag.getOpStatus() != null && !tag.getOpStatus().equals(ACCESS_OPERATION_STATUS.ACCESS_SUCCESS)) {
                                             err = tag.getOpStatus().toString().replaceAll("_", " ");
-                                            tagResultData = err;
+                                            if (tag.getOpStatus().equals(ACCESS_OPERATION_STATUS.ACCESS_TAG_MEMORY_LOCKED_ERROR)) {
+                                                tagResultData = "TAG LOCKED";
+                                            }
                                         } else {
                                             if (tag.getOpCode() == ACCESS_OPERATION_CODE.ACCESS_OPERATION_WRITE) {
                                                 tagResultData = "WRITE SUCCESS";
                                             } else {
                                                 err = "WRITE FAIL";
-                                                tagResultData = err;
                                             }
                                         }
                                     } else {
                                         err = "ACCESS WRITE memoryBankData is null";
-                                        tagResultData = err;
                                     }
                                 } else {
                                     err = "ACCESS WRITE OPERATION FAILED";
-                                    tagResultData = err;
                                 }
                                 break;
                             case READ:
@@ -779,54 +713,41 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
                                     if (readAccessOperation != null) {
                                         if (tag.getOpStatus() != null && !tag.getOpStatus().equals(ACCESS_OPERATION_STATUS.ACCESS_SUCCESS)) {
                                             err = tag.getOpStatus().toString().replaceAll("_", " ");
-                                            tagResultData = err;
                                         } else {
                                             if (tag.getOpCode() == ACCESS_OPERATION_CODE.ACCESS_OPERATION_READ) {
                                                 tagResultData = tag.getMemoryBankData();
                                                 if (readLengthOffset > 0) {
                                                     tagResultData = tagResultData.substring(0, tagResultData.length() - readLengthOffset);
                                                 }
-                                                log("READ DATA: " + tagResultData + " ID: " + tag.getTagID() + " TIME: " + tag.SeenTime.getUTCTime().toString());
                                             } else {
                                                 err = "READ FAIL";
-                                                tagResultData = err;
                                             }
                                         }
                                     } else {
                                         err = "ACCESS READ memoryBankData is null";
-                                        tagResultData = err;
                                     }
                                 } else {
                                     err = "ACCESS OPERATION FAILED";
-                                    tagResultData = err;
                                 }
                                 break;
-                            case LOCK:
+                            case PERMA_LOCK:
                                 if (tag != null) {
                                     ACCESS_OPERATION_CODE readAccessOperation = tag.getOpCode();
                                     if (readAccessOperation != null) {
                                         if (tag.getOpStatus() != null && !tag.getOpStatus().equals(ACCESS_OPERATION_STATUS.ACCESS_SUCCESS)) {
                                             err = tag.getOpStatus().toString().replaceAll("_", " ");
-                                            tagResultData = err;
                                         } else {
                                             if (tag.getOpCode() == ACCESS_OPERATION_CODE.ACCESS_OPERATION_LOCK) {
-                                                tagResultData = tag.getMemoryBankData();
-                                                if (readLengthOffset > 0) {
-                                                    tagResultData = tagResultData.substring(0, tagResultData.length() - readLengthOffset);
-                                                }
-                                                log("DATA: " + tagResultData + " ID: " + tag.getTagID() + " TIME: " + tag.SeenTime.getUTCTime().toString());
+                                                tagResultData = "LOCK SUCCESS";
                                             } else {
                                                 err = "LOCK FAIL";
-                                                tagResultData = err;
                                             }
                                         }
                                     } else {
                                         err = "ACCESS LOCK memoryBankData is null";
-                                        tagResultData = err;
                                     }
                                 } else {
                                     err = "ACCESS LOCK OPERATION FAILED";
-                                    tagResultData = err;
                                 }
                                 break;
                         }
@@ -844,7 +765,7 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             }
 
             if (err != null) {
-                log("RFID - " + err);
+                log("RFID ERROR - " + err);
             }
         }
     }
@@ -853,7 +774,6 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
     public void eventStatusNotify(RfidStatusEvents rfidStatusEvents) {
         WritableMap event = Arguments.createMap();
         STATUS_EVENT_TYPE statusEventType = rfidStatusEvents.StatusEventData.getStatusEventType();
-        log(statusEventType.toString());
 
         if (statusEventType == STATUS_EVENT_TYPE.INVENTORY_START_EVENT) {
             event.putString("RFIDStatusEvent", "inventoryStart");
@@ -869,7 +789,6 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
         } else if (statusEventType == STATUS_EVENT_TYPE.HANDHELD_TRIGGER_EVENT) {
             HANDHELD_TRIGGER_EVENT_TYPE eventData = rfidStatusEvents.StatusEventData.HandheldTriggerEventData.getHandheldEvent();
             String err = null;
-            log(eventData.toString());
             if (eventData == HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_PRESSED) {
                 try {
                     switch (rfidMode) {
@@ -883,14 +802,14 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
                             this.read();
                             break;
                         case WRITE:
-                            log("TEST");
                             event.putString("RFIDStatusEvent", "inventoryStart");
                             this.write();
                             break;
-                        case LOCK:
-                            this.lock();
+                        case PERMA_LOCK:
+                            this.permaLock();
                             break;
                         case NONE:
+                            // Do nothing
                             break;
                     }
                 } catch (InvalidUsageException e) {
@@ -905,22 +824,14 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
                     Log.e("RFID", err);
                 }
             } else if (eventData == HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_RELEASED) {
-                log("RELEASE: " + rfidMode + " " + active);
                 if (rfidMode.equals(WRITE) || rfidMode.equals(READ) && filterTagId != null && filter_memory_bank != null) {
                     event.putString("RFIDStatusEvent", "inventoryStop");
                 }
                 this.cancel();
             }
         }
-
-        // TODO: Richtig Implementieren
         if (event.hasKey("RFIDStatusEvent")) {
-        //    if (!active) {
             this.dispatchEvent("RFIDStatusEvent", event);
         }
-        //    } else if (rfidStatusEvents.StatusEventData.HandheldTriggerEventData.getHandheldEvent() == HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_RELEASED) {
-        //        deferTriggerReleased = true;
-        //    }
-//       }
     }
 }
