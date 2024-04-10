@@ -137,6 +137,6 @@
     <orderEntry type="library" name="Gradle: com.facebook.fresco:nativeimagefilters:2.0.0@aar" level="project" />
     <orderEntry type="library" name="Gradle: com.facebook.fresco:nativeimagetranscoder:2.0.0@aar" level="project" />
     <orderEntry type="library" name="Gradle: com.facebook.fresco:imagepipeline-okhttp3:2.0.0@aar" level="project" />
-    <orderEntry type="library" name="Gradle: :API3_LIB-release-2.0.1.27:@aar" level="project" />
+    <orderEntry type="library" name="Gradle: :API3_LIB-release-2.0.2.116:@aar" level="project" />
   </component>
 </module>

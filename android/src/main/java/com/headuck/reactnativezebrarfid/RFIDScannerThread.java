@@ -525,12 +525,17 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
 
             if (memory_bank != null) {
                 writeAccessParams.setMemoryBank(memory_bank);
+                if (memory_bank == MEMORY_BANK.MEMORY_BANK_USER) {
+                    writeAccessParams.setOffset(0);
+                } else {
+                    writeAccessParams.setOffset(2);
+                }
             } else {
                 writeAccessParams.setMemoryBank(MEMORY_BANK.MEMORY_BANK_USER);
+                writeAccessParams.setOffset(0);
             }
 
             writeAccessParams.setAccessPassword(0);
-            writeAccessParams.setOffset(0);
             writeAccessParams.setWriteData(tagData);
             writeAccessParams.setWriteRetries(3);
             writeAccessParams.setWriteDataLength(tagData.length() / 4);
@@ -690,9 +695,14 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
                                     if (readAccessOperation != null) {
                                         if (tag.getOpStatus() != null && !tag.getOpStatus().equals(ACCESS_OPERATION_STATUS.ACCESS_SUCCESS)) {
                                             err = tag.getOpStatus().toString().replaceAll("_", " ");
-                                            if (tag.getOpStatus().equals(ACCESS_OPERATION_STATUS.ACCESS_TAG_MEMORY_LOCKED_ERROR)) {
+                                            if (tag.getOpStatus()
+                                                    .equals(ACCESS_OPERATION_STATUS.ACCESS_TAG_MEMORY_LOCKED_ERROR)) {
                                                 tagResultData = "TAG LOCKED";
-                                            }
+                                            } else if (tag.getOpStatus()
+                                            .equals(ACCESS_OPERATION_STATUS.ACCESS_TAG_MEMORY_OVERRUN_ERROR)) {
+                                        tagResultData = "MEMORY OVERRUN";
+                                    } 
+                                            
                                         } else {
                                             if (tag.getOpCode() == ACCESS_OPERATION_CODE.ACCESS_OPERATION_WRITE) {
                                                 tagResultData = "WRITE SUCCESS";
