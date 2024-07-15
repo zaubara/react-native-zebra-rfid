@@ -36,6 +36,7 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
 
     private final static String LOCK_PASSWORD = "lock_password";
     private final static String LOCK_ACCESS_PASSWORD = "lock_password";
+    private final static String LOCK_EPC_MEMORY = "lock_epc_memory";
     private final static String LOCK_USER_MEMORY = "lock_user_memory";
 
     // default values
@@ -430,6 +431,9 @@ public abstract class RFIDScannerThread extends Thread implements RfidEventsList
             switch (config.getString(LOCK_MEMORY)) {
                 case LOCK_ACCESS_PASSWORD:
                     lock_memory = LOCK_DATA_FIELD.LOCK_ACCESS_PASSWORD;
+                    break;
+                case LOCK_EPC_MEMORY:
+                    lock_memory = LOCK_DATA_FIELD.LOCK_EPC_MEMORY;
                     break;
                 case LOCK_USER_MEMORY:
                 default:
